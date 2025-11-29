@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudEdu TaskManager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .form-container {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .tasks-list {
+            margin-top: 20px;
+        }
+
+        .task-item {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .task-item:hover {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transform: translateX(5px);
+        }
+
+        .task-item.completed {
+            background: #f0f8f0;
+            border-color: #4caf50;
+        }
+
+        .task-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .task-item.completed .task-title {
+            text-decoration: line-through;
+            color: #888;
+        }
+
+        .task-description {
+            color: #666;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-toggle {
+            background: #4caf50;
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+
+        .btn-delete {
+            background: #f44336;
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📝 CloudEdu TaskManager</h1>
+        <p class="subtitle">Proyecto Cloud-Native con Kubernetes</p>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-number">{{ tasks|length }}</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ tasks|selectattr('completed', 'equalto', False)|list|length }}</div>
+                <div class="stat-label">Pendientes</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ tasks|selectattr('completed', 'equalto', True)|list|length }}</div>
+                <div class="stat-label">Completadas</div>
+            </div>
+        </div>
+
+        <div class="form-container">
+            <h2 style="margin-bottom: 20px; color: #333;">➕ Nueva Tarea</h2>
+            <form action="/add" method="POST">
+                <div class="form-group">
+                    <label for="title">Título *</label>
+                    <input type="text" id="title" name="title" required placeholder="Ej: Completar documentación">
+                </div>
+                <div class="form-group">
+                    <label for="description">Descripción</label>
+                    <textarea id="description" name="description" placeholder="Detalles de la tarea..."></textarea>
+                </div>
+                <button type="submit">Añadir Tarea</button>
+            </form>
+        </div>
+
+        <div class="tasks-list">
+            <h2 style="margin-bottom: 20px; color: #333;">📋 Mis Tareas</h2>
+            
+            {% if tasks %}
+                {% for task in tasks %}
+                <div class="task-item {% if task.completed %}completed{% endif %}">
+                    <div class="task-title">
+                        {% if task.completed %}✅{% else %}⏳{% endif %}
+                        {{ task.title }}
+                    </div>
+                    {% if task.description %}
+                    <div class="task-description">{{ task.description }}</div>
+                    {% endif %}
+                    <div class="task-actions">
+                        <a href="/toggle/{{ task.id }}">
+                            <button class="btn-toggle">
+                                {% if task.completed %}Marcar Pendiente{% else %}Marcar Completada{% endif %}
+                            </button>
+                        </a>
+                        <a href="/delete/{{ task.id }}">
+                            <button class="btn-delete">Eliminar</button>
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/>
+                        <path d="M7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/>
+                    </svg>
+                    <h3>No hay tareas todavía</h3>
+                    <p>¡Añade tu primera tarea para comenzar!</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

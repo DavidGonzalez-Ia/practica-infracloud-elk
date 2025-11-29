@@ -1,0 +1,77 @@
+---
+# ServiceAccount para la aplicación
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: taskmanager-sa
+  namespace: cloudedu
+  labels:
+    app: taskmanager
+
+---
+# Role: Permisos para leer ConfigMaps y Secrets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taskmanager-role
+  namespace: cloudedu
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+
+---
+# RoleBinding: Asocia el Role con el ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: taskmanager-rolebinding
+  namespace: cloudedu
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: taskmanager-role
+subjects:
+- kind: ServiceAccount
+  name: taskmanager-sa
+  namespace: cloudedu
+
+---
+# ClusterRole: Para administradores del proyecto
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudedu-admin
+rules:
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "create", "update", "delete"]
+- apiGroups: [""]
+  resources: ["services", "pods", "persistentvolumeclaims"]
+  verbs: ["get", "list", "create", "update", "delete"]
+
+---
+# ClusterRole: Para desarrolladores (solo lectura)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudedu-developer
+rules:
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services", "pods", "persistentvolumeclaims"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]

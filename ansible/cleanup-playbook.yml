@@ -1,0 +1,45 @@
+---
+- name: Limpieza de CloudEdu TaskManager
+  hosts: local
+  gather_facts: no
+  vars:
+    namespace: cloudedu
+    
+  tasks:
+    - name: Eliminar namespace (esto elimina todo dentro)
+      command: kubectl delete namespace {{ namespace }} --ignore-not-found=true
+      register: delete_namespace
+      
+    - name: Mostrar resultado de eliminación de namespace
+      debug:
+        msg: "{{ delete_namespace.stdout }}"
+
+    - name: Eliminar Persistent Volume
+      command: kubectl delete pv mysql-pv --ignore-not-found=true
+      register: delete_pv
+      
+    - name: Mostrar resultado de eliminación de PV
+      debug:
+        msg: "{{ delete_pv.stdout }}"
+
+    - name: Eliminar ClusterRoles
+      command: kubectl delete clusterrole {{ item }} --ignore-not-found=true
+      loop:
+        - cloudedu-admin
+        - cloudedu-developer
+      register: delete_clusterroles
+      
+    - name: Verificar que todo fue eliminado
+      command: kubectl get all -n {{ namespace }}
+      register: verify_cleanup
+      failed_when: false
+      changed_when: false
+      
+    - name: Mensaje final
+      debug:
+        msg:
+          - "=========================================="
+          - "✅ Limpieza completada"
+          - "=========================================="
+          - "Todos los recursos han sido eliminados"
+          - "=========================================="

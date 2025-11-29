@@ -1,0 +1,149 @@
+---
+- name: Despliegue Automatizado de CloudEdu TaskManager
+  hosts: local
+  gather_facts: yes
+  vars:
+    project_root: "{{ playbook_dir }}/.."
+    namespace: cloudedu
+    docker_image: cloudedu-taskmanager:v1
+    
+  tasks:
+    - name: Mostrar información del sistema
+      debug:
+        msg: 
+          - "Sistema Operativo: {{ ansible_distribution }}"
+          - "Versión: {{ ansible_distribution_version }}"
+          - "Arquitectura: {{ ansible_architecture }}"
+          - "Namespace Kubernetes: {{ namespace }}"
+
+    - name: Verificar que Docker está instalado
+      command: docker --version
+      register: docker_version
+      changed_when: false
+      
+    - name: Mostrar versión de Docker
+      debug:
+        msg: "{{ docker_version.stdout }}"
+
+    - name: Verificar que kubectl está instalado
+      command: kubectl version --client --short
+      register: kubectl_version
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Mostrar versión de kubectl
+      debug:
+        msg: "{{ kubectl_version.stdout }}"
+      when: kubectl_version.rc == 0
+
+    - name: Verificar que el cluster de Kubernetes está accesible
+      command: kubectl cluster-info
+      register: cluster_info
+      changed_when: false
+      
+    - name: Construir imagen Docker de la aplicación
+      command: docker build -t {{ docker_image }} .
+      args:
+        chdir: "{{ project_root }}/app"
+      register: docker_build
+      
+    - name: Mostrar resultado de la construcción
+      debug:
+        msg: "Imagen Docker construida exitosamente: {{ docker_image }}"
+      when: docker_build.rc == 0
+
+    - name: Verificar que la imagen existe
+      command: docker images {{ docker_image }} --format "{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}"
+      register: docker_images_check
+      changed_when: false
+      
+    - name: Mostrar imágenes disponibles
+      debug:
+        msg: "{{ docker_images_check.stdout_lines }}"
+
+    - name: Crear namespace de Kubernetes
+      command: kubectl apply -f {{ project_root }}/kubernetes/namespace.yaml
+      register: namespace_result
+      
+    - name: Mostrar resultado de namespace
+      debug:
+        msg: "{{ namespace_result.stdout }}"
+
+    - name: Aplicar Persistent Volume
+      command: kubectl apply -f {{ project_root }}/kubernetes/mysql-pv.yaml
+      register: pv_result
+      
+    - name: Mostrar resultado de PV
+      debug:
+        msg: "{{ pv_result.stdout }}"
+
+    - name: Desplegar MySQL
+      command: kubectl apply -f {{ project_root }}/kubernetes/{{ item }}
+      loop:
+        - mysql-deployment.yaml
+        - mysql-service.yaml
+      register: mysql_result
+      
+    - name: Mostrar resultado de MySQL
+      debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ mysql_result.results }}"
+
+    - name: Aplicar configuración RBAC
+      command: kubectl apply -f {{ project_root }}/kubernetes/rbac.yaml
+      register: rbac_result
+      
+    - name: Mostrar resultado de RBAC
+      debug:
+        msg: "{{ rbac_result.stdout }}"
+
+    - name: Desplegar aplicación TaskManager
+      command: kubectl apply -f {{ project_root }}/kubernetes/{{ item }}
+      loop:
+        - app-deployment.yaml
+        - app-service.yaml
+      register: app_result
+      
+    - name: Mostrar resultado de la aplicación
+      debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ app_result.results }}"
+
+    - name: Esperar a que los pods estén listos
+      command: kubectl wait --for=condition=ready pod -l app=mysql -n {{ namespace }} --timeout=120s
+      register: wait_mysql
+      ignore_errors: yes
+      
+    - name: Esperar a que la aplicación esté lista
+      command: kubectl wait --for=condition=ready pod -l app=taskmanager -n {{ namespace }} --timeout=120s
+      register: wait_app
+      ignore_errors: yes
+
+    - name: Obtener estado de los pods
+      command: kubectl get pods -n {{ namespace }}
+      register: pods_status
+      changed_when: false
+      
+    - name: Mostrar estado de los pods
+      debug:
+        msg: "{{ pods_status.stdout_lines }}"
+
+    - name: Obtener información de los servicios
+      command: kubectl get svc -n {{ namespace }}
+      register: services_info
+      changed_when: false
+      
+    - name: Mostrar servicios
+      debug:
+        msg: "{{ services_info.stdout_lines }}"
+
+    - name: Mensaje final
+      debug:
+        msg:
+          - "=========================================="
+          - "✅ Despliegue completado exitosamente"
+          - "=========================================="
+          - "Accede a la aplicación en: http://localhost:30080"
+          - "Namespace: {{ namespace }}"
+          - "Imagen Docker: {{ docker_image }}"
+          - "=========================================="
