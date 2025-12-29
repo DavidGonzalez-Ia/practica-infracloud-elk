@@ -66,4 +66,5 @@ spec:
           timeoutSeconds: 3
       volumes:
       - name: mysql-storage
-        emptyDir: {}  # Datos temporales, pero funciona perfectamente para el proyecto
+        persistentVolumeClaim:
+          claimName: mysql-pvc

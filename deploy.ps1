@@ -11,6 +11,7 @@ $NAMESPACE = "cloudedu"
 $DOCKER_IMAGE = "cloudedu-taskmanager:v1"
 $APP_DIR = "app"
 $K8S_DIR = "kubernetes"
+$DEPLOY_ELK = $true  # Controlar despliegue de ELK Stack
 
 # Función para verificar comandos
 function Test-Command {
@@ -72,6 +73,18 @@ if ($imageExists) {
     exit 1
 }
 
+# Detectar si estamos usando Minikube y cargar la imagen
+$currentContext = kubectl config current-context 2>$null
+if ($currentContext -eq "minikube") {
+    Write-Host "[5.5/10] Detectado Minikube - Cargando imagen en Minikube..." -ForegroundColor Yellow
+    minikube image load $DOCKER_IMAGE 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Imagen cargada en Minikube" -ForegroundColor Green
+    } else {
+        Write-Host "⚠ Advertencia: No se pudo cargar la imagen en Minikube" -ForegroundColor Yellow
+    }
+}
+
 # Crear namespace
 Write-Host "[6/10] Creando namespace '$NAMESPACE'..." -ForegroundColor Yellow
 kubectl apply -f "$K8S_DIR/namespace.yaml" | Out-Null
@@ -99,6 +112,42 @@ kubectl apply -f "$K8S_DIR/app-deployment.yaml" | Out-Null
 kubectl apply -f "$K8S_DIR/app-service.yaml" | Out-Null
 Write-Host "✓ Aplicación desplegada" -ForegroundColor Green
 
+# Desplegar ELK Stack si está habilitado
+if ($DEPLOY_ELK) {
+    Write-Host "[11/12] Desplegando ELK Stack (Elasticsearch, Logstash, Kibana)..." -ForegroundColor Yellow
+    
+    # Crear ConfigMaps para ELK
+    kubectl apply -f "$K8S_DIR/elk-config.yaml" | Out-Null
+    Write-Host "✓ Configuración de ELK creada" -ForegroundColor Green
+    
+    # Desplegar Elasticsearch
+    Write-Host "Desplegando Elasticsearch..." -ForegroundColor Yellow
+    kubectl apply -f "$K8S_DIR/elasticsearch-deployment.yaml" | Out-Null
+    Write-Host "✓ Elasticsearch desplegado" -ForegroundColor Green
+    
+    # Esperar a que Elasticsearch esté listo
+    Write-Host "Esperando Elasticsearch..." -ForegroundColor Yellow
+    kubectl wait --for=condition=ready pod -l app=elasticsearch -n $NAMESPACE --timeout=120s 2>&1 | Out-Null
+    Write-Host "✓ Elasticsearch listo" -ForegroundColor Green
+    
+    # Desplegar Logstash
+    Write-Host "Desplegando Logstash..." -ForegroundColor Yellow
+    kubectl apply -f "$K8S_DIR/logstash-deployment.yaml" | Out-Null
+    Write-Host "✓ Logstash desplegado" -ForegroundColor Green
+    
+    # Desplegar Kibana
+    Write-Host "Desplegando Kibana..." -ForegroundColor Yellow
+    kubectl apply -f "$K8S_DIR/kibana-deployment.yaml" | Out-Null
+    Write-Host "✓ Kibana desplegado" -ForegroundColor Green
+    
+    # Desplegar Filebeat
+    Write-Host "Desplegando Filebeat..." -ForegroundColor Yellow
+    kubectl apply -f "$K8S_DIR/filebeat-deployment.yaml" | Out-Null
+    Write-Host "✓ Filebeat desplegado" -ForegroundColor Green
+}
+
+Write-Host "[12/12] Completado" -ForegroundColor Yellow
+
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Esperando a que los pods estén listos..." -ForegroundColor Cyan
@@ -113,7 +162,6 @@ kubectl wait --for=condition=ready pod -l app=mysql -n $NAMESPACE --timeout=120s
 Write-Host "Esperando aplicación TaskManager..." -ForegroundColor Yellow
 kubectl wait --for=condition=ready pod -l app=taskmanager -n $NAMESPACE --timeout=120s 2>&1 | Out-Null
 
-Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "✓ Despliegue completado exitosamente" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
@@ -131,4 +179,15 @@ Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "🎉 Aplicación disponible en:" -ForegroundColor Green
 Write-Host "   http://localhost:30080" -ForegroundColor Yellow
+if ($DEPLOY_ELK) {
+    Write-Host ""
+    Write-Host "📊 Kibana disponible en:" -ForegroundColor Yellow
+    Write-Host "   http://localhost:30601" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Instrucciones para Kibana:" -ForegroundColor Cyan
+    Write-Host "1. Accede a http://localhost:30601" -ForegroundColor White
+    Write-Host "2. Ve a 'Stack Management' > 'Index Patterns'" -ForegroundColor White
+    Write-Host "3. Crea un patrón de índice para 'logs-*'" -ForegroundColor White
+    Write-Host "4. Ve al 'Discover' tab para ver los logs" -ForegroundColor White
+}
 Write-Host "=========================================" -ForegroundColor Green
