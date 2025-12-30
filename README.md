@@ -38,12 +38,12 @@ Básicamente hemos montado una aplicación web sencilla (TaskManager) en Kuberne
 - [x] 1,856+ logs indexados y consultables
 - [x] Logging implementado en la aplicación
 
-#### 3. Búsquedas y Visualizaciones ✅
+#### 3. Búsquedas y Visualizaciones 
 - [x] Búsquedas documentadas y funcionales
 - [x] Visualizaciones configuradas
 - [x] Guías paso a paso incluidas (QUICK-START-ELK.md, ELK-LOGGING-GUIDE.md)
 
-#### 4. Infrastructure as Code (IaC) ✅
+#### 4. Infrastructure as Code (IaC) 
 - [x] Playbooks de Ansible para despliegue completo
 - [x] Playbook de cleanup
 - [x] Inventario y configuración
@@ -116,7 +116,7 @@ kubectl port-forward -n cloudedu svc/elasticsearch 9200:9200
 
 ---
 
-## 📚 Documentación
+##  Documentación
 
 ### Documentos Principales
 
