@@ -66,12 +66,14 @@ jobs:
         path: taskmanager-image.tar.gz
         retention-days: 1
 
-  # Job 2: Deploy a Kubernetes
+  # Job 2: Deploy a Kubernetes (Deshabilitado - requiere cluster remoto)
+  # NOTA: Este job está comentado porque requiere un cluster de Kubernetes accesible desde GitHub Actions
+  # En producción, se usaría un cluster en la nube (AKS, EKS, GKE)
   deploy-to-kubernetes:
     name: Deploy to Kubernetes with ELK
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false  # Deshabilitado temporalmente - funciona solo con cluster remoto
     
     steps:
     - name: Checkout code
@@ -186,12 +188,12 @@ jobs:
         echo "📝 TaskManager App: http://localhost:$APP_PORT"
         echo "📊 Kibana Dashboard: http://localhost:$KIBANA_PORT"
 
-  # Job 3: Health Check y Smoke Tests
+  # Job 3: Health Check y Smoke Tests (Deshabilitado - requiere cluster remoto)
   health-check:
     name: Health Check and Smoke Tests
     needs: deploy-to-kubernetes
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false  # Deshabilitado temporalmente - funciona solo con cluster remoto
     
     steps:
     - name: Checkout code
@@ -262,22 +264,25 @@ jobs:
         echo "  kubectl port-forward -n $NAMESPACE svc/taskmanager-service 8080:5000"
         echo "  kubectl port-forward -n $NAMESPACE svc/kibana 5601:5601"
 
-  # Job 4: Notificaciones (opcional)
+  # Job 4: Notificaciones
   notify:
     name: Send Deployment Notifications
-    needs: [build-and-test, deploy-to-kubernetes, health-check]
+    needs: [build-and-test]  # Solo depende de build ya que deploy está deshabilitado
     runs-on: ubuntu-latest
     if: always()
     
     steps:
-    - name: Deployment Success Notification
+    - name: Build Success Notification
       if: success()
       run: |
-        echo "✅ Deployment completed successfully!"
+        echo "✅ Build and tests completed successfully!"
         echo "All checks passed."
+        echo ""
+        echo "ℹ️  Deployment jobs are disabled because they require a remote Kubernetes cluster."
+        echo "   To enable: set 'if: false' to proper conditions in deploy-to-kubernetes job."
         
-    - name: Deployment Failure Notification
+    - name: Build Failure Notification
       if: failure()
       run: |
-        echo "❌ Deployment failed!"
+        echo "❌ Build or tests failed!"
         echo "Please check the logs for more details."
