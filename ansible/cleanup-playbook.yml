@@ -1,7 +1,14 @@
 ---
-- name: Limpieza de CloudEdu TaskManager
-  hosts: local
+# Playbook de limpieza de recursos de Kubernetes
+# Autores: Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez
+# Fecha: Diciembre 2025
+# Descripción: Elimina todos los recursos del namespace cloudedu y limpia recursos globales
+
+- name: Limpiar recursos de Kubernetes
+  hosts: localhost
+  connection: local
   gather_facts: no
+  
   vars:
     namespace: cloudedu
     

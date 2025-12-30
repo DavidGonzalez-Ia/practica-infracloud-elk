@@ -1,18 +1,36 @@
+# Elasticsearch Deployment para ELK Stack
+# Autores: Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez
+---
 apiVersion: v1
-kind: ConfigMap
+kind: Service
 metadata:
-  name: elasticsearch-config
+  name: elasticsearch
   namespace: cloudedu
-data:
-  elasticsearch.yml: |
-    cluster.name: elk-cluster
-    node.name: ${HOSTNAME}
-    discovery.type: single-node
-    xpack.security.enabled: false
-    xpack.monitoring.enabled: true
-    xpack.watcher.enabled: false
-    action.auto_create_index: true
-
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9300
+      targetPort: 9300
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-pvc
+  namespace: cloudedu
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -34,60 +52,31 @@ spec:
       containers:
       - name: elasticsearch
         image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-        env:
-        - name: discovery.type
-          value: "single-node"
-        - name: xpack.security.enabled
-          value: "false"
-        - name: ES_JAVA_OPTS
-          value: "-Xms512m -Xmx512m"
         ports:
         - containerPort: 9200
           name: http
         - containerPort: 9300
           name: transport
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: xpack.security.enrollment.enabled
+          value: "false"
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
             memory: "1Gi"
             cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /_cluster/health
-            port: 9200
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /_cluster/health
-            port: 9200
-          initialDelaySeconds: 20
-          periodSeconds: 5
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
         volumeMounts:
         - name: elasticsearch-data
           mountPath: /usr/share/elasticsearch/data
       volumes:
       - name: elasticsearch-data
-        emptyDir: {}
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: elasticsearch
-  namespace: cloudedu
-  labels:
-    app: elasticsearch
-spec:
-  type: ClusterIP
-  ports:
-  - port: 9200
-    targetPort: 9200
-    name: http
-  - port: 9300
-    targetPort: 9300
-    name: transport
-  selector:
-    app: elasticsearch
+        persistentVolumeClaim:
+          claimName: elasticsearch-pvc

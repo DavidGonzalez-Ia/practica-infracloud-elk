@@ -1,0 +1,283 @@
+name: Deploy CloudEdu TaskManager with ELK Stack
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: cloudedu-taskmanager
+  DOCKER_TAG: ${{ github.sha }}
+  NAMESPACE: cloudedu
+
+jobs:
+  # Job 1: Build y Test
+  build-and-test:
+    name: Build and Test Application
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        
+    - name: Cache Python dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        cd app
+        pip install -r requirements.txt
+        pip install pytest pytest-cov flake8
+        
+    - name: Lint with flake8
+      run: |
+        cd app
+        # Stop build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
+    - name: Build Docker image
+      run: |
+        cd app
+        docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
+        docker tag $DOCKER_IMAGE:$DOCKER_TAG $DOCKER_IMAGE:latest
+        
+    - name: Save Docker image
+      run: |
+        docker save $DOCKER_IMAGE:$DOCKER_TAG | gzip > taskmanager-image.tar.gz
+        
+    - name: Upload Docker image artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: docker-image
+        path: taskmanager-image.tar.gz
+        retention-days: 1
+
+  # Job 2: Deploy a Kubernetes
+  deploy-to-kubernetes:
+    name: Deploy to Kubernetes with ELK
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: docker-image
+        
+    - name: Load Docker image
+      run: |
+        docker load < taskmanager-image.tar.gz
+        
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    # Configurar acceso a tu cluster (ajusta según tu proveedor)
+    - name: Configure kubectl (ejemplo con kubeconfig)
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        kubectl cluster-info
+      
+    # Opcional: Push a Docker Registry
+    - name: Login to Docker Hub
+      if: secrets.DOCKERHUB_USERNAME != ''
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Push to Docker Hub
+      if: secrets.DOCKERHUB_USERNAME != ''
+      run: |
+        docker tag $DOCKER_IMAGE:$DOCKER_TAG ${{ secrets.DOCKERHUB_USERNAME }}/$DOCKER_IMAGE:$DOCKER_TAG
+        docker tag $DOCKER_IMAGE:$DOCKER_TAG ${{ secrets.DOCKERHUB_USERNAME }}/$DOCKER_IMAGE:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/$DOCKER_IMAGE:$DOCKER_TAG
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/$DOCKER_IMAGE:latest
+    
+    # Deploy de los componentes
+    - name: Create namespace
+      run: |
+        kubectl apply -f kubernetes/namespace.yaml
+        
+    - name: Deploy RBAC
+      run: |
+        kubectl apply -f kubernetes/rbac.yaml
+        
+    - name: Deploy MySQL
+      run: |
+        kubectl apply -f kubernetes/mysql-pv.yaml
+        kubectl apply -f kubernetes/mysql-deployment.yaml
+        kubectl apply -f kubernetes/mysql-service.yaml
+        
+    - name: Wait for MySQL to be ready
+      run: |
+        kubectl wait --for=condition=ready pod -l app=mysql -n $NAMESPACE --timeout=180s
+        
+    - name: Deploy Elasticsearch
+      run: |
+        kubectl apply -f kubernetes/elasticsearch-deployment.yaml
+        echo "Waiting for Elasticsearch to be ready..."
+        kubectl wait --for=condition=ready pod -l app=elasticsearch -n $NAMESPACE --timeout=300s
+        
+    - name: Deploy Kibana
+      run: |
+        kubectl apply -f kubernetes/kibana-deployment.yaml
+        echo "Waiting for Kibana to be ready..."
+        kubectl wait --for=condition=ready pod -l app=kibana -n $NAMESPACE --timeout=300s
+        
+    - name: Deploy Filebeat
+      run: |
+        kubectl apply -f kubernetes/filebeat-daemonset.yaml
+        echo "Filebeat DaemonSet deployed"
+        sleep 20
+        
+    - name: Update application deployment with new image
+      run: |
+        # Si usas Docker Hub, actualiza la imagen en el deployment
+        if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+          kubectl set image deployment/taskmanager-app flask-app=${{ secrets.DOCKERHUB_USERNAME }}/$DOCKER_IMAGE:$DOCKER_TAG -n $NAMESPACE
+        fi
+        kubectl apply -f kubernetes/app-deployment.yaml
+        kubectl apply -f kubernetes/app-service.yaml
+        
+    - name: Wait for application to be ready
+      run: |
+        kubectl wait --for=condition=ready pod -l app=taskmanager -n $NAMESPACE --timeout=180s
+        
+    - name: Verify deployment
+      run: |
+        echo "=== Pods Status ==="
+        kubectl get pods -n $NAMESPACE
+        echo ""
+        echo "=== Services ==="
+        kubectl get svc -n $NAMESPACE
+        echo ""
+        echo "=== DaemonSets ==="
+        kubectl get daemonsets -n $NAMESPACE
+        echo ""
+        echo "=== Elasticsearch Indices ==="
+        kubectl exec -n $NAMESPACE deploy/elasticsearch -- curl -s http://localhost:9200/_cat/indices
+        
+    - name: Get application URL
+      run: |
+        APP_PORT=$(kubectl get svc taskmanager-service -n $NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}')
+        KIBANA_PORT=$(kubectl get svc kibana -n $NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}')
+        echo "🎉 Deployment successful!"
+        echo "📝 TaskManager App: http://localhost:$APP_PORT"
+        echo "📊 Kibana Dashboard: http://localhost:$KIBANA_PORT"
+
+  # Job 3: Health Check y Smoke Tests
+  health-check:
+    name: Health Check and Smoke Tests
+    needs: deploy-to-kubernetes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Configure kubectl
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        
+    - name: Check application health
+      run: |
+        echo "Checking TaskManager health endpoint..."
+        APP_POD=$(kubectl get pod -n $NAMESPACE -l app=taskmanager -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n $NAMESPACE $APP_POD -- curl -f http://localhost:5000/health || exit 1
+        echo "✓ Application is healthy"
+        
+    - name: Check Elasticsearch health
+      run: |
+        echo "Checking Elasticsearch health..."
+        ES_POD=$(kubectl get pod -n $NAMESPACE -l app=elasticsearch -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n $NAMESPACE $ES_POD -- curl -f http://localhost:9200/_cluster/health || exit 1
+        echo "✓ Elasticsearch is healthy"
+        
+    - name: Check Kibana health
+      run: |
+        echo "Checking Kibana health..."
+        KIBANA_POD=$(kubectl get pod -n $NAMESPACE -l app=kibana -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n $NAMESPACE $KIBANA_POD -- curl -f http://localhost:5601/api/status || exit 1
+        echo "✓ Kibana is healthy"
+        
+    - name: Verify logs are being collected
+      run: |
+        echo "Verifying Filebeat is collecting logs..."
+        sleep 30
+        ES_POD=$(kubectl get pod -n $NAMESPACE -l app=elasticsearch -o jsonpath='{.items[0].metadata.name}')
+        INDICES=$(kubectl exec -n $NAMESPACE $ES_POD -- curl -s http://localhost:9200/_cat/indices)
+        echo "$INDICES"
+        if echo "$INDICES" | grep -q "filebeat"; then
+          echo "✓ Logs are being collected by Filebeat"
+        else
+          echo "⚠ Warning: No filebeat indices found yet"
+        fi
+        
+    - name: Generate sample logs
+      run: |
+        echo "Generating sample application logs..."
+        APP_POD=$(kubectl get pod -n $NAMESPACE -l app=taskmanager -o jsonpath='{.items[0].metadata.name}')
+        # Hacer algunas peticiones para generar logs
+        for i in {1..5}; do
+          kubectl exec -n $NAMESPACE $APP_POD -- curl -s http://localhost:5000/health > /dev/null
+          sleep 2
+        done
+        echo "✓ Sample logs generated"
+        
+    - name: Final deployment summary
+      run: |
+        echo "======================================"
+        echo "🎉 Deployment and Health Check Complete!"
+        echo "======================================"
+        echo ""
+        echo "📊 Cluster Status:"
+        kubectl get all -n $NAMESPACE
+        echo ""
+        echo "📝 Useful Commands:"
+        echo "  kubectl logs -n $NAMESPACE -l app=taskmanager --tail=50"
+        echo "  kubectl logs -n $NAMESPACE -l app=filebeat --tail=50"
+        echo "  kubectl port-forward -n $NAMESPACE svc/taskmanager-service 8080:5000"
+        echo "  kubectl port-forward -n $NAMESPACE svc/kibana 5601:5601"
+
+  # Job 4: Notificaciones (opcional)
+  notify:
+    name: Send Deployment Notifications
+    needs: [build-and-test, deploy-to-kubernetes, health-check]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Deployment Success Notification
+      if: success()
+      run: |
+        echo "✅ Deployment completed successfully!"
+        echo "All checks passed."
+        
+    - name: Deployment Failure Notification
+      if: failure()
+      run: |
+        echo "❌ Deployment failed!"
+        echo "Please check the logs for more details."

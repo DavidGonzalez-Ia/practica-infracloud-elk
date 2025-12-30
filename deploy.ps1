@@ -1,4 +1,6 @@
 # Script de Despliegue Automatizado - CloudEdu TaskManager
+# Autores: Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez
+# Fecha: Diciembre 2025
 # Este script automatiza todo el proceso de despliegue (equivalente a IaC con Ansible)
 
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -11,7 +13,6 @@ $NAMESPACE = "cloudedu"
 $DOCKER_IMAGE = "cloudedu-taskmanager:v1"
 $APP_DIR = "app"
 $K8S_DIR = "kubernetes"
-$DEPLOY_ELK = $true  # Controlar despliegue de ELK Stack
 
 # Función para verificar comandos
 function Test-Command {
@@ -107,46 +108,25 @@ kubectl apply -f "$K8S_DIR/rbac.yaml" | Out-Null
 Write-Host "✓ RBAC configurado" -ForegroundColor Green
 
 # Desplegar aplicación
-Write-Host "[10/10] Desplegando aplicación TaskManager..." -ForegroundColor Yellow
+Write-Host "[10/15] Desplegando aplicación TaskManager..." -ForegroundColor Yellow
 kubectl apply -f "$K8S_DIR/app-deployment.yaml" | Out-Null
 kubectl apply -f "$K8S_DIR/app-service.yaml" | Out-Null
 Write-Host "✓ Aplicación desplegada" -ForegroundColor Green
 
-# Desplegar ELK Stack si está habilitado
-if ($DEPLOY_ELK) {
-    Write-Host "[11/12] Desplegando ELK Stack (Elasticsearch, Logstash, Kibana)..." -ForegroundColor Yellow
-    
-    # Crear ConfigMaps para ELK
-    kubectl apply -f "$K8S_DIR/elk-config.yaml" | Out-Null
-    Write-Host "✓ Configuración de ELK creada" -ForegroundColor Green
-    
-    # Desplegar Elasticsearch
-    Write-Host "Desplegando Elasticsearch..." -ForegroundColor Yellow
-    kubectl apply -f "$K8S_DIR/elasticsearch-deployment.yaml" | Out-Null
-    Write-Host "✓ Elasticsearch desplegado" -ForegroundColor Green
-    
-    # Esperar a que Elasticsearch esté listo
-    Write-Host "Esperando Elasticsearch..." -ForegroundColor Yellow
-    kubectl wait --for=condition=ready pod -l app=elasticsearch -n $NAMESPACE --timeout=120s 2>&1 | Out-Null
-    Write-Host "✓ Elasticsearch listo" -ForegroundColor Green
-    
-    # Desplegar Logstash
-    Write-Host "Desplegando Logstash..." -ForegroundColor Yellow
-    kubectl apply -f "$K8S_DIR/logstash-deployment.yaml" | Out-Null
-    Write-Host "✓ Logstash desplegado" -ForegroundColor Green
-    
-    # Desplegar Kibana
-    Write-Host "Desplegando Kibana..." -ForegroundColor Yellow
-    kubectl apply -f "$K8S_DIR/kibana-deployment.yaml" | Out-Null
-    Write-Host "✓ Kibana desplegado" -ForegroundColor Green
-    
-    # Desplegar Filebeat
-    Write-Host "Desplegando Filebeat..." -ForegroundColor Yellow
-    kubectl apply -f "$K8S_DIR/filebeat-deployment.yaml" | Out-Null
-    Write-Host "✓ Filebeat desplegado" -ForegroundColor Green
-}
+# Desplegar Elasticsearch
+Write-Host "[11/15] Desplegando Elasticsearch..." -ForegroundColor Yellow
+kubectl apply -f "$K8S_DIR/elasticsearch-deployment.yaml" | Out-Null
+Write-Host "✓ Elasticsearch desplegado" -ForegroundColor Green
 
-Write-Host "[12/12] Completado" -ForegroundColor Yellow
+# Desplegar Kibana
+Write-Host "[12/15] Desplegando Kibana..." -ForegroundColor Yellow
+kubectl apply -f "$K8S_DIR/kibana-deployment.yaml" | Out-Null
+Write-Host "✓ Kibana desplegado" -ForegroundColor Green
+
+# Desplegar Filebeat
+Write-Host "[13/15] Desplegando Filebeat DaemonSet..." -ForegroundColor Yellow
+kubectl apply -f "$K8S_DIR/filebeat-daemonset.yaml" | Out-Null
+Write-Host "✓ Filebeat desplegado" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -158,10 +138,23 @@ Write-Host ""
 Write-Host "Esperando MySQL..." -ForegroundColor Yellow
 kubectl wait --for=condition=ready pod -l app=mysql -n $NAMESPACE --timeout=120s 2>&1 | Out-Null
 
+# Esperar a que Elasticsearch esté listo
+Write-Host "Esperando Elasticsearch..." -ForegroundColor Yellow
+kubectl wait --for=condition=ready pod -l app=elasticsearch -n $NAMESPACE --timeout=180s 2>&1 | Out-Null
+
+# Esperar a que Kibana esté listo
+Write-Host "Esperando Kibana..." -ForegroundColor Yellow
+kubectl wait --for=condition=ready pod -l app=kibana -n $NAMESPACE --timeout=180s 2>&1 | Out-Null
+
 # Esperar a que la app esté lista
 Write-Host "Esperando aplicación TaskManager..." -ForegroundColor Yellow
 kubectl wait --for=condition=ready pod -l app=taskmanager -n $NAMESPACE --timeout=120s 2>&1 | Out-Null
 
+# Verificar Filebeat
+Write-Host "Verificando Filebeat DaemonSet..." -ForegroundColor Yellow
+Start-Sleep -Seconds 10
+
+Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "✓ Despliegue completado exitosamente" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
@@ -176,18 +169,19 @@ Write-Host "Servicios:" -ForegroundColor Cyan
 kubectl get svc -n $NAMESPACE
 Write-Host ""
 
+Write-Host "DaemonSets:" -ForegroundColor Cyan
+kubectl get daemonsets -n $NAMESPACE
+Write-Host ""
+
 Write-Host "=========================================" -ForegroundColor Green
-Write-Host "🎉 Aplicación disponible en:" -ForegroundColor Green
-Write-Host "   http://localhost:30080" -ForegroundColor Yellow
-if ($DEPLOY_ELK) {
-    Write-Host ""
-    Write-Host "📊 Kibana disponible en:" -ForegroundColor Yellow
-    Write-Host "   http://localhost:30601" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Instrucciones para Kibana:" -ForegroundColor Cyan
-    Write-Host "1. Accede a http://localhost:30601" -ForegroundColor White
-    Write-Host "2. Ve a 'Stack Management' > 'Index Patterns'" -ForegroundColor White
-    Write-Host "3. Crea un patrón de índice para 'logs-*'" -ForegroundColor White
-    Write-Host "4. Ve al 'Discover' tab para ver los logs" -ForegroundColor White
-}
+Write-Host "🎉 Aplicaciones disponibles:" -ForegroundColor Green
+Write-Host "   📝 TaskManager: http://localhost:30080" -ForegroundColor Yellow
+Write-Host "   📊 Kibana:      http://localhost:30601" -ForegroundColor Yellow
+Write-Host "=========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "💡 Instrucciones para Kibana:" -ForegroundColor Cyan
+Write-Host "   1. Accede a http://localhost:30601" -ForegroundColor White
+Write-Host "   2. Ve a Management > Stack Management > Index Management" -ForegroundColor White
+Write-Host "   3. Crea Data View con patrón: filebeat-*" -ForegroundColor White
+Write-Host "   4. Ve a Analytics > Discover para ver los logs" -ForegroundColor White
 Write-Host "=========================================" -ForegroundColor Green

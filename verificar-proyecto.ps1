@@ -1,10 +1,12 @@
 # Script de Verificación Completa del Proyecto CloudEdu TaskManager
-# Este script verifica TODOS los requisitos incluyendo ELK Stack
+# Autores: Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez
+# Fecha: Diciembre 2025
+# Este script verifica TODOS los requisitos del PDF
 
-Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║        VERIFICACIÓN COMPLETA DEL PROYECTO             ║" -ForegroundColor Cyan
-Write-Host "║        CloudEdu TaskManager + ELK Stack               ║" -ForegroundColor Cyan
-Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "=========================================" -ForegroundColor Cyan
+Write-Host "VERIFICACIÓN COMPLETA DEL PROYECTO" -ForegroundColor Cyan
+Write-Host "CloudEdu TaskManager" -ForegroundColor Cyan
+Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $errores = 0

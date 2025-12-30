@@ -1,0 +1,205 @@
+---
+# Playbook de despliegue completo de TaskManager + ELK Stack en Kubernetes
+# Autores: Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez
+# Fecha: Diciembre 2025
+# Descripción: Automatiza el despliegue de la aplicación TaskManager con sistema de logs centralizado ELK
+
+- name: Desplegar TaskManager con ELK Stack en Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  
+  vars:
+    namespace: cloudedu
+    app_name: taskmanager
+    app_version: v1
+    elk_version: "8.11.0"
+    docker_image: "cloudedu-taskmanager:v1"
+    kubeconfig: "{{ lookup('env', 'KUBECONFIG') | default('~/.kube/config', true) }}"
+    k8s_manifests_dir: "../kubernetes"
+    
+  tasks:
+    - name: Verificar que kubectl está instalado
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_version
+      failed_when: kubectl_version.rc != 0
+      changed_when: false
+
+    - name: Verificar que Minikube está funcionando
+      ansible.builtin.command: kubectl cluster-info
+      register: cluster_info
+      failed_when: cluster_info.rc != 0
+      changed_when: false
+
+    - name: Mostrar información del cluster
+      ansible.builtin.debug:
+        msg: "Cluster Kubernetes detectado y funcionando"
+
+    - name: Crear namespace cloudedu si no existe
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ namespace }}"
+            labels:
+              name: "{{ namespace }}"
+              managed-by: ansible
+      
+    - name: Construir imagen Docker de la aplicación
+      ansible.builtin.command:
+        cmd: docker build -t {{ docker_image }} .
+        chdir: ../app
+      register: docker_build
+      changed_when: "'Successfully built' in docker_build.stdout or 'Successfully tagged' in docker_build.stdout"
+
+    - name: Cargar imagen en Minikube
+      ansible.builtin.command:
+        cmd: minikube image load {{ docker_image }}
+      register: minikube_load
+      changed_when: minikube_load.rc == 0
+      
+    - name: Desplegar MySQL - PersistentVolume
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/mysql-pv.yaml"
+        namespace: "{{ namespace }}"
+        
+    - name: Desplegar MySQL - Deployment y Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/mysql-deployment.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Esperar a que MySQL esté listo
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=mysql
+      register: mysql_pods
+      until: mysql_pods.resources | length > 0 and mysql_pods.resources[0].status.phase == "Running"
+      retries: 30
+      delay: 10
+
+    - name: Desplegar TaskManager - ServiceAccount
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/taskmanager-serviceaccount.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Desplegar TaskManager - Role y RoleBinding
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/taskmanager-role.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Desplegar TaskManager - Deployment y Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/taskmanager-deployment.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Esperar a que TaskManager esté listo
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=taskmanager-app
+      register: app_pods
+      until: app_pods.resources | length > 0 and app_pods.resources[0].status.phase == "Running"
+      retries: 20
+      delay: 10
+
+    - name: Desplegar Elasticsearch - Deployment y Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/elasticsearch-deployment.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Esperar a que Elasticsearch esté listo
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=elasticsearch
+      register: es_pods
+      until: es_pods.resources | length > 0 and es_pods.resources[0].status.phase == "Running"
+      retries: 30
+      delay: 10
+
+    - name: Desplegar Kibana - Deployment y Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/kibana-deployment.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Esperar a que Kibana esté listo
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=kibana
+      register: kibana_pods
+      until: kibana_pods.resources | length > 0 and kibana_pods.resources[0].status.phase == "Running"
+      retries: 30
+      delay: 10
+
+    - name: Desplegar Filebeat - DaemonSet
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/filebeat-daemonset.yaml"
+        namespace: "{{ namespace }}"
+
+    - name: Esperar a que Filebeat esté listo
+      kubernetes.core.k8s_info:
+        kind: DaemonSet
+        namespace: "{{ namespace }}"
+        name: filebeat
+      register: filebeat_ds
+      until: filebeat_ds.resources | length > 0 and filebeat_ds.resources[0].status.numberReady > 0
+      retries: 20
+      delay: 10
+
+    - name: Obtener pods desplegados
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+      register: all_pods
+
+    - name: Mostrar estado de los pods
+      ansible.builtin.debug:
+        msg: "{{ item.metadata.name }}: {{ item.status.phase }}"
+      loop: "{{ all_pods.resources }}"
+
+    - name: Verificar servicios desplegados
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: "{{ namespace }}"
+      register: services
+
+    - name: Mostrar servicios disponibles
+      ansible.builtin.debug:
+        msg: "Servicio {{ item.metadata.name }} expuesto en puerto {{ item.spec.ports[0].port }}"
+      loop: "{{ services.resources }}"
+
+    - name: Resumen del despliegue
+      ansible.builtin.debug:
+        msg:
+          - "===================================="
+          - "DESPLIEGUE COMPLETADO EXITOSAMENTE"
+          - "===================================="
+          - "Namespace: {{ namespace }}"
+          - "Aplicación TaskManager: Desplegada"
+          - "Base de datos MySQL: Desplegada"
+          - "ELK Stack (Elasticsearch + Kibana + Filebeat): Desplegado"
+          - ""
+          - "ACCESO A SERVICIOS:"
+          - "- TaskManager: kubectl port-forward -n cloudedu svc/taskmanager-app-service 30080:5000"
+          - "- Kibana: kubectl port-forward -n cloudedu svc/kibana 5601:5601"
+          - "- Elasticsearch: kubectl port-forward -n cloudedu svc/elasticsearch 9200:9200"
+          - ""
+          - "VERIFICAR LOGS:"
+          - "kubectl logs -n cloudedu -l app=taskmanager-app"
+          - "kubectl logs -n cloudedu -l app=filebeat"

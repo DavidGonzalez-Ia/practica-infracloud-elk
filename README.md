@@ -1,477 +1,213 @@
-# TaskManager CloudEdu - Kubernetes Deployment with ELK Stack
-
-Aplicación TaskManager desplegada en Kubernetes con integración del stack ELK (Elasticsearch, Logstash, Kibana) para centralizar y visualizar logs.
-
-## 📋 Tabla de Contenidos
-
-- [Requisitos Previos](#requisitos-previos)
-- [Estructura del Proyecto](#estructura-del-proyecto)
-- [Despliegue Local (Minikube)](#despliegue-local-minikube)
-- [Acceder a la Aplicación](#acceder-a-la-aplicación)
-- [Sistema de Logs ELK](#sistema-de-logs-elk)
-- [GitHub Actions CI/CD](#github-actions-cicd)
-- [Troubleshooting](#troubleshooting)
-
-## 🔧 Requisitos Previos
-
-### Software Requerido
-
-- **Docker Desktop** 4.0+
-- **Kubernetes/Minikube** 1.24+
-- **kubectl** 1.24+
-- **PowerShell** 7.0+ (para scripts de despliegue)
-- **Git** 2.30+
-
-### Recursos Mínimos (Minikube)
-
-```bash
-minikube start --cpus=4 --memory=6144 --disk-size=30g
-```
-
-## 📁 Estructura del Proyecto
-
-```
-Trabajo nube/
-├── app/                                    # Código de la aplicación Flask
-│   ├── app.py                             # Aplicación principal con logging JSON
-│   ├── requirements.txt                    # Dependencias Python (incluye python-json-logger)
-│   ├── Dockerfile                         # Imagen Docker
-│   └── templates/                         # Plantillas HTML
-├── kubernetes/                             # Manifiestos de Kubernetes
-│   ├── namespace.yaml                     # Namespace 'cloudedu'
-│   ├── app-deployment.yaml                # Deployment de Flask
-│   ├── app-service.yaml                   # Service de Flask
-│   ├── mysql-deployment.yaml              # Deployment de MySQL
-│   ├── mysql-service.yaml                 # Service de MySQL
-│   ├── mysql-pv.yaml                      # Persistent Volume
-│   ├── rbac.yaml                          # Roles y permisos
-│   ├── elasticsearch-deployment.yaml      # Elasticsearch
-│   ├── kibana-deployment.yaml             # Kibana
-│   ├── logstash-deployment.yaml           # Logstash
-│   ├── filebeat-deployment.yaml           # Filebeat (DaemonSet)
-│   └── elk-config.yaml                    # Configuración ELK
-├── .github/
-│   └── workflows/
-│       └── ci-cd-elk.yml                  # GitHub Actions workflow
-├── ansible/                               # Playbooks de Ansible (opcional)
-├── docs/
-│   ├── README.md                          # Este archivo
-│   └── ELK-INTEGRATION.md                 # Documentación detallada de ELK
-├── deploy.ps1                             # Script de despliegue PowerShell
-├── cleanup.ps1                            # Script para limpiar recursos
-└── verificar-proyecto.ps1                 # Script de verificación
-```
-
-## 🚀 Despliegue Local (Minikube)
-
-### Paso 1: Iniciar Minikube
-
-```powershell
-# Iniciar Minikube con recursos suficientes
-minikube start --cpus=4 --memory=6144 --disk-size=30g --vm-driver=hyperv
-
-# Verificar que está corriendo
-minikube status
-```
-
-### Paso 2: Ejecutar el Script de Despliegue
-
-```powershell
-# Navegar al directorio del proyecto
-cd "C:\Users\david\Documents\Trabajo nube"
-
-# Ejecutar el script (despliega automáticamente ELK Stack)
-.\deploy.ps1
-```
-
-El script realizará automáticamente:
-- ✅ Validación de herramientas (Docker, kubectl)
-- ✅ Construcción de la imagen Docker
-- ✅ Carga de la imagen en Minikube
-- ✅ Creación del namespace
-- ✅ Despliegue de MySQL
-- ✅ Despliegue de la aplicación Flask
-- ✅ Despliegue del stack ELK completo (Elasticsearch, Logstash, Kibana, Filebeat)
-
-### Paso 3: Verificar el Despliegue
-
-```powershell
-# Ver estado de los pods
-kubectl get pods -n cloudedu
-
-# Ver servicios
-kubectl get svc -n cloudedu
-
-# Ver logs de la aplicación
-kubectl logs -n cloudedu deployment/taskmanager-app
-
-# Seguir logs en tiempo real
-kubectl logs -f deployment/taskmanager-app -n cloudedu
-```
-
-## 📱 Acceder a la Aplicación
-
-### TaskManager Web App
-
-```
-URL: http://localhost:30080
-```
-
-**Funcionalidades:**
-- Crear tareas
-- Marcar tareas como completadas
-- Eliminar tareas
-- Ver todas las tareas
-
-### Health Check
-
-```bash
-curl http://localhost:30080/health
-```
-
-Respuesta:
-```json
-{
-  "status": "healthy",
-  "database": "connected"
-}
-```
-
-## 📊 Sistema de Logs ELK
-
-### Kibana Dashboard
-
-```
-URL: http://localhost:30601
-```
-
-#### Primer Acceso
-
-1. **Crear Index Pattern**:
-   - Stack Management → Index Patterns
-   - Crear patrón `logs-*`
-   - Time Field: `@timestamp`
-
-2. **Ver Logs**:
-   - Discover → Seleccionar `logs-*`
-   - Ver logs en tiempo real
-
-#### Búsquedas Útiles (KQL)
-
-```
-# Todos los errores
-level: "ERROR"
-
-# Errores en los últimos 15 minutos
-level: "ERROR" and @timestamp > now-15m
-
-# Errores de base de datos
-message: "*Database*" and level: "ERROR"
-
-# Operaciones POST
-message: "POST*"
-
-# Por aplicación
-application: "taskmanager"
-
-# Por pod específico
-kubernetes.pod.name: "taskmanager-app-*"
-```
-
-#### Crear Visualizaciones
-
-**Ejemplo 1: Pie chart de niveles de log**
-
-1. Visualizations → Create
-2. Pie chart
-3. Metrics: Count
-4. Buckets: Terms field=level.keyword
-5. Save
-
-**Ejemplo 2: Timeline de logs**
-
-1. Visualizations → Create
-2. Area chart
-3. Metrics: Count
-4. X-axis: Date histogram @timestamp
-5. Save
-
-### Componentes ELK
-
-| Componente | Puerto | Imagen |
-|-----------|--------|--------|
-| Elasticsearch | 9200 | `docker.elastic.co/elasticsearch/elasticsearch:8.11.0` |
-| Kibana | 30601 | `docker.elastic.co/kibana/kibana:8.11.0` |
-| Logstash | 5000 | `docker.elastic.co/logstash/logstash:8.11.0` |
-| Filebeat | - (DaemonSet) | `docker.elastic.co/beats/filebeat:8.11.0` |
-
-### Flujo de Logs
-
-```
-Flask App (logs JSON a stdout)
-    ↓
-Filebeat (recolecta del Docker daemon)
-    ↓
-Elasticsearch (indexa logs)
-    ↓
-Kibana (visualiza)
-```
-
-## 🔄 GitHub Actions CI/CD
-
-El workflow automatiza:
-
-### 1. Code Quality Checks
-- Python linting (flake8)
-- Formateo de código (black)
-
-### 2. Build
-- Construcción de imagen Docker
-- Push a GitHub Container Registry (GHCR)
-- Caching de capas
-
-### 3. Security
-- Análisis de vulnerabilidades (bandit)
-- Verificación de dependencias (safety)
-
-### 4. Reports
-- Tests unitarios
-- Cobertura de código
-- Upload a Codecov
-
-### Configuración de Secrets
-
-En GitHub → Settings → Secrets and variables → Actions:
-
-```
-No se requieren secrets adicionales si usas GITHUB_TOKEN
-```
-
-### Ejecutar Workflow
-
-El workflow se ejecuta automáticamente en:
-- Push a `main` o `develop`
-- Pull request a `main`
-
-Ver resultados: GitHub → Actions tab
-
-## 📝 Tipos de Logs Generados
-
-### 1. Logs de Inicialización
-```json
-{
-  "@timestamp": "2025-12-29T10:00:00Z",
-  "message": "Database initialized successfully",
-  "level": "INFO"
-}
-```
-
-### 2. Logs de Conexión
-```json
-{
-  "@timestamp": "2025-12-29T10:00:05Z",
-  "message": "Database connection successful",
-  "level": "INFO",
-  "attempt": 1
-}
-```
-
-### 3. Logs de Operaciones
-```json
-{
-  "@timestamp": "2025-12-29T10:01:00Z",
-  "message": "GET / - Tasks fetched successfully",
-  "level": "INFO",
-  "count": 5
-}
-```
-
-### 4. Logs de Errores
-```json
-{
-  "@timestamp": "2025-12-29T10:02:00Z",
-  "message": "Database connection failed",
-  "level": "ERROR",
-  "error": "Access denied",
-  "error_code": 1045
-}
-```
-
-## 🔧 Comandos Útiles
-
-### Minikube
-
-```bash
-# Obtener IP de Minikube
-minikube ip
-
-# Abrir túnel para servicios (en otra terminal)
-minikube tunnel
-
-# Dashboard de Minikube
-minikube dashboard
-
-# Detener Minikube
-minikube stop
-
-# Eliminar Minikube
-minikube delete
-```
-
-### Kubernetes
-
-```bash
-# Ver pods en tiempo real
-kubectl get pods -n cloudedu -w
-
-# Obtener descripción de pod
-kubectl describe pod <pod-name> -n cloudedu
-
-# Ver logs de un contenedor
-kubectl logs deployment/taskmanager-app -n cloudedu
-
-# Ejecutar comando en un pod
-kubectl exec -it deployment/taskmanager-app -n cloudedu -- /bin/bash
-
-# Obtener eventos del namespace
-kubectl get events -n cloudedu
-
-# Eliminar todos los recursos del namespace
-kubectl delete namespace cloudedu
-```
-
-### Docker
-
-```bash
-# Construir imagen manualmente
-docker build -t cloudedu-taskmanager:v1 ./app
-
-# Listar imágenes
-docker images cloudedu*
-
-# Ver logs de un contenedor
-docker logs <container-id>
-```
-
-### Elasticsearch
-
-```bash
-# Verificar estado del cluster
-kubectl exec -n cloudedu deployment/elasticsearch -- \
-  curl -s http://localhost:9200/_cluster/health | jq .
-
-# Listar índices
-kubectl exec -n cloudedu deployment/elasticsearch -- \
-  curl -s http://localhost:9200/_cat/indices | head -20
-
-# Obtener documentos de un índice
-kubectl exec -n cloudedu deployment/elasticsearch -- \
-  curl -s "http://localhost:9200/logs-*/_search?pretty" | jq .hits.hits
-```
-
-## 🐛 Troubleshooting
-
-### Pod no inicia
-
-```bash
-# Ver logs detallados
-kubectl describe pod <pod-name> -n cloudedu
-kubectl logs <pod-name> -n cloudedu --previous
-
-# Verificar recursos disponibles
-kubectl top nodes
-kubectl top pod -n cloudedu
-```
-
-### Elasticsearch no conecta
-
-```bash
-# Verificar servicio
-kubectl get svc elasticsearch -n cloudedu
-
-# Probar conectividad dentro del cluster
-kubectl exec -n cloudedu deployment/kibana -- curl -v http://elasticsearch:9200
-
-# Ver logs de Elasticsearch
-kubectl logs deployment/elasticsearch -n cloudedu
-```
-
-### Kibana no muestra logs
-
-```bash
-# Verificar que hay índices
-kubectl exec -n cloudedu deployment/elasticsearch -- \
-  curl -s http://localhost:9200/_cat/indices
-
-# Verificar que Filebeat está recolectando
-kubectl logs -n cloudedu ds/filebeat | tail -50
-
-# Verificar Logstash
-kubectl logs -n cloudedu deployment/logstash | tail -50
-```
-
-### Base de datos sin conectar
-
-```bash
-# Ver logs de MySQL
-kubectl logs deployment/mysql -n cloudedu
-
-# Verificar PersistentVolume
-kubectl get pv -n cloudedu
-kubectl describe pv <pv-name>
-
-# Ejecutar en el pod de la app
-kubectl exec -it deployment/taskmanager-app -n cloudedu -- python -c \
-  "import mysql.connector; conn = mysql.connector.connect(host='mysql-service', user='root', password='rootpassword'); print('Connected!')"
-```
-
-## 📚 Documentación Adicional
-
-- [ELK Integration Details](./ELK-INTEGRATION.md) - Configuración detallada de ELK
-- [Elasticsearch Docs](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
-- [Kibana User Guide](https://www.elastic.co/guide/en/kibana/current/index.html)
-- [Kubernetes Docs](https://kubernetes.io/docs/)
-
-## 🧹 Limpiar Recursos
-
-```powershell
-# Ejecutar el script de limpieza
-.\cleanup.ps1
-
-# O manualmente
-kubectl delete namespace cloudedu
-minikube delete
-```
-
-## 🔐 Notas de Seguridad
-
-⚠️ **Configuración Actual (DESARROLLO)**
-- Elasticsearch sin autenticación
-- Kibana sin autenticación
-- MySQL con contraseña default
-- Logs sin cifrado
-
-✅ **Para Producción**
-1. Habilitar XPack security en Elasticsearch
-2. Configurar TLS/SSL
-3. Usar secretos de Kubernetes para contraseñas
-4. Implementar RBAC
-5. Usar PersistentVolumes con respaldo
-6. Configurar políticas de retención de logs
-
-## 📞 Soporte
-
-Para reportar issues o sugerencias:
-1. Crear un GitHub Issue
-2. Describir el problema
-3. Incluir logs relevantes
-4. Especificar versiones de software
-
-## 📄 Licencia
-
-MIT License - Ver LICENSE file
+# Práctica Final - TaskManager con ELK
+
+**Autores:** Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez  
+**Asignatura:** Infraestructura Cloud  
+**Fecha:** Diciembre 2025
 
 ---
 
-**Última actualización**: Diciembre 29, 2025  
-**Versión**: 1.2 (con ELK Stack)
+## Qué es esto
+
+Básicamente hemos montado una aplicación web sencilla (TaskManager) en Kubernetes con un sistema de logs centralizado usando ELK Stack. La idea era poder ver todos los logs de los pods en un solo sitio en vez de ir mirando uno por uno con kubectl.
+
+## Tecnologías que usamos
+
+- **Docker** - para los contenedores
+- **Kubernetes (Minikube)** - orquestación
+- **MySQL** - base de datos de las tareas
+- **Python + Flask** - la app web
+- **ELK Stack** - para los logs:
+  - Elasticsearch: guarda y busca los logs
+  - Kibana: interfaz web para verlos
+  - Filebeat: recoge los logs de los pods
+- **Ansible** - para automatizar el despliegue
+- **GitHub Actions** - CI/CD básico
+
+## Lo que hemos hecho
+
+### Sistema de Logs Centralizado
+- Elasticsearch corriendo en el cluster
+- Kibana accesible en el puerto 5601
+- Filebeat recogiendo logs de todos los pods
+- Más de 1.800 logs indexados
+
+### Logs desde los Pods
+- Filebeat configurado como DaemonSet (se ejecuta en todos los nodos)
+- Los logs van en formato JSON para que sea más fácil buscar
+- Configuramos permisos RBAC para que Filebeat pueda leer los logs
+- [x] 1,856+ logs indexados y consultables
+- [x] Logging implementado en la aplicación
+
+#### 3. Búsquedas y Visualizaciones ✅
+- [x] Búsquedas documentadas y funcionales
+- [x] Visualizaciones configuradas
+- [x] Guías paso a paso incluidas (QUICK-START-ELK.md, ELK-LOGGING-GUIDE.md)
+
+#### 4. Infrastructure as Code (IaC) ✅
+- [x] Playbooks de Ansible para despliegue completo
+- [x] Playbook de cleanup
+- [x] Inventario y configuración
+
+### Búsquedas y Visualizaciones
+- Hicimos búsquedas en Kibana filtrando por nivel (ERROR, INFO, etc.)
+- Creamos algunas visualizaciones tipo gráficas de barras y líneas
+- Está todo documentado en las guías
+
+### Ansible (IaC)
+- Hicimos playbooks de Ansible para automatizar el despliegue
+- Un playbook despliega todo (deploy-playbook.yml)
+- Otro limpia todo (cleanup-playbook.yml)
+- También dejamos scripts de PowerShell por si alguien no quiere usar Ansible
+
+### Documentación
+- Este README
+- Diagramas de arquitectura
+- Guía de uso de ELK
+- Reflexión con lo que aprendimos
+
+## Cómo funciona
+
+La app (TaskManager) genera logs → Van a /var/log/containers/ → Filebeat los lee → Los manda a Elasticsearch → Se ven en Kibana
+
+Ver más detalles en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)
+
+## Cómo desplegarlo
+
+### Con Ansible (lo más fácil)
+
+```bash
+# Instalar Ansible si no lo tienes
+pip install ansible
+ansible-galaxy collection install kubernetes.core
+
+# Desplegar todo
+cd ansible
+ansible-playbook deploy-playbook.yml
+
+# Ver que todo está corriendo
+kubectl get pods -n cloudedu
+```
+
+### Con PowerShell (alternativa)
+
+```powershell
+.\deploy.ps1
+```
+
+## Acceder a los servicios
+
+**Para ver la app TaskManager:**
+```bash
+kubectl port-forward -n cloudedu svc/taskmanager-app-service 30080:5000
+```
+Luego ir a: http://localhost:30080
+
+**Kibana:**
+```bash
+kubectl port-forward -n cloudedu svc/kibana 5601:5601
+# Acceder a: http://localhost:5601
+```
+
+**Elasticsearch:**
+```bash
+kubectl port-forward -n cloudedu svc/elasticsearch 9200:9200
+# API: http://localhost:9200
+```
+
+---
+
+## 📚 Documentación
+
+### Documentos Principales
+
+1. **[QUICK-START-ELK.md](QUICK-START-ELK.md)** - Guía rápida de 5 minutos
+2. **[docs/ELK-LOGGING-GUIDE.md](docs/ELK-LOGGING-GUIDE.md)** - Guía completa de uso del stack ELK
+3. **[docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)** - Diagramas y arquitectura del sistema
+4. **[docs/REFLEXION.md](docs/REFLEXION.md)** - Reflexión final del proyecto
+5. **[ansible/README.md](ansible/README.md)** - Documentación de Ansible IaC
+6. **[docs/GITHUB-ACTIONS-SETUP.md](docs/GITHUB-ACTIONS-SETUP.md)** - Configuración CI/CD
+
+### Estructura del Proyecto
+
+```
+Trabajo nube/
+├── app/                          # Código de la aplicación
+│   ├── app.py                    # Flask app con logging JSON
+│   ├── templates/                # Templates HTML
+│   └── Dockerfile                # Imagen Docker
+├── kubernetes/                   # Manifiestos de Kubernetes
+│   ├── mysql-*.yaml              # MySQL deployment
+│   ├── taskmanager-*.yaml        # TaskManager deployment
+│   ├── elasticsearch-*.yaml      # Elasticsearch
+│   ├── kibana-*.yaml             # Kibana
+│   └── filebeat-*.yaml           # Filebeat DaemonSet
+├── ansible/                      # Infrastructure as Code
+│   ├── deploy-playbook.yml       # Despliegue completo
+│   ├── cleanup-playbook.yml      # Limpieza
+│   ├── inventory.ini             # Inventario
+│   └── README.md                 # Documentación
+├── docs/                         # Documentación
+
+**Para ver Kibana (los logs):**
+```bash
+kubectl port-forward -n cloudedu svc/kibana 5601:5601
+```
+Luego ir a: http://localhost:5601
+
+## Estructura del proyecto
+
+```
+Trabajo nube/
+├── app/                    # Código de la aplicación Flask
+├── kubernetes/             # Manifiestos YAML de Kubernetes
+├── ansible/                # Playbooks de Ansible
+├── docs/                   # Documentación adicional
+├── deploy.ps1              # Script para desplegar
+└── cleanup.ps1             # Script para limpiar todo
+```
+
+## Comandos útiles
+
+```bash
+# Ver los pods
+kubectl get pods -n cloudedu
+
+# Ver logs de la app
+kubectl logs -n cloudedu -l app=taskmanager-app
+
+# Ver logs de Filebeat
+kubectl logs -n cloudedu -l app=filebeat
+
+# Comprobar Elasticsearch
+curl http://localhost:9200/_cluster/health
+```
+
+## Configurar Kibana
+
+1. Abrir http://localhost:5601
+2. Ir a Management → Data Views
+3. Crear Data View con `filebeat-*`
+4. Ir a Discover para ver los logs
+
+## Problemas que tuvimos
+
+- **MySQL no arrancaba**: El PVC se quedaba en Pending porque Minikube con Docker no provisiona volúmenes automáticamente. Tuvimos que crear un PV manual con hostPath.
+
+- **Kibana no se veía desde fuera**: El NodePort no funciona con Minikube + Docker. La solución fue usar `kubectl port-forward`.
+
+- **Los logs no estaban en JSON**: Tuvimos que crear un JSONFormatter custom en Python para que los logs salieran bien estructurados.
+
+Ver más detalles en [docs/REFLEXION.md](docs/REFLEXION.md)
+
+## Cosas que se podrían mejorar
+
+- Poner más réplicas de Elasticsearch para alta disponibilidad
+- Usar un Ingress Controller en vez de port-forward
+- Añadir Prometheus para métricas (ahora solo tenemos logs)
+- Hacer Helm Charts
+- Configurar alertas en Kibana
+
+---
+
+**Equipo:** Manuel Botella, Carlos Gomez, Diego Rodriguez, Hugo Langenaeken, David Gonzalez  
+**Diciembre 2025**
